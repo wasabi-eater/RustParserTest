@@ -4,51 +4,54 @@ use core::ops::Range;
 use core::ops::Index;
 use std::rc::Rc;
 
-type Parser<S, A, E> = Box<dyn FnOnce(S) -> (S, Result<A, E>)>;
+struct Parser<S, A, E>(Box<dyn FnOnce(S) -> (S, Result<A, E>)>);
 #[macro_export]
 macro_rules! parser {
-    {let! $var: pat = $e1: expr; $(let! $v: pat = $e2: expr);* ; $e3: expr} => (Box::new(|state|{
-        let (state, result) = $e1(state);
-        match result {
-            Ok($var) => parser!{$(let! $v = $e2);* ; $e3}(state),
-            Err(e) => (state, Err(e))
-        }
-    }) as Parser<_, _, _>);
-    {let! $var: pat = $e1: expr; $e2: expr} => (Box::new(|state|{
-        let (state, result) = $e1(state);
-        match result {
-            Ok($var) => $e2(state),
-            Err(e) => (state, Err(e)),
-        }
-    }) as Parser<_, _, _>);
+    {let! $var: pat = $e1: expr; $(let! $v: pat = $e2: expr);* ; $e3: expr} => ($e1.flat_map(|$var| parser!{$(let! $v = $e2);* ; $e3}));
+    {let! $var: pat = $e1: expr; $e2: expr} => ($e1.flat_map(|$var| $e2));
     {$e: expr} => ($e);
 }
-pub fn ret<S, A: 'static, E: 'static>(value: A) -> Parser<S, A, E>{
-    Box::new(|state| (state, Ok(value)))
-}
-pub fn get<S: 'static + Copy, E: 'static>() -> Parser<S, S, E> {
-    Box::new(|state| (state, Ok(state)))
-}
-pub fn set<S: 'static, E: 'static>(new_state: S) -> Parser<S, S, E> {
-    Box::new(|state| (new_state, Ok(state)))
-}
-pub fn try_parse<S: 'static, A: 'static, E: 'static>(parser: Parser<S, A, E>) -> Parser<S, Result<A, E>, E> {
-    Box::new(|state| {
-        let (state, result) = parser(state);
-        (state, Ok(result))
-    })
-}
-pub fn many<S: 'static, A: 'static, E: 'static>(parser: impl 'static + Fn() -> Parser<S, A, E>) -> Parser<S, Vec<A>, E> {
-    fn inner<S: 'static, A: 'static, E: 'static>(parser: impl 'static + Fn() -> Parser<S, A, E>, mut vec: Vec<A>) -> Parser<S, Vec<A>, E> {
-        parser! {
-            let! result = try_parse(parser());
-            (match result{
-                Ok(value) => inner(parser, {vec.push(value); vec}),
-                Err(_) => ret(vec)
-            })
-        }
+impl<S: 'static, A: 'static, E: 'static> Parser<S, A, E>{
+    pub fn ret(value: A) -> Parser<S, A, E>{
+        Parser(Box::new(|state| (state, Ok(value))))
     }
-    inner(parser, vec![])
+    pub fn try_parse(self) -> Parser<S, Result<A, E>, E> {
+        Parser(Box::new(|state| {
+            let (state, result) = self.0(state);
+            (state, Ok(result))
+        }))
+    }
+    pub fn many(parser: impl 'static + Fn() -> Parser<S, A, E>) -> Parser<S, Vec<A>, E> {
+        fn inner<S: 'static, A: 'static, E: 'static>(parser: impl 'static + Fn() -> Parser<S, A, E>, mut vec: Vec<A>) -> Parser<S, Vec<A>, E> {
+            parser! {
+                let! result = Parser::try_parse(parser());
+                (match result{
+                    Ok(value) => inner(parser, {vec.push(value); vec}),
+                    Err(_) => Parser::ret(vec)
+                })
+            }
+        }
+        inner(parser, vec![])
+    }
+    pub fn flat_map<B>(self, f: impl 'static + FnOnce(A) -> Parser<S, B, E>) -> Parser<S, B, E> {
+        Parser(Box::new(|state|{
+            let (state, result) = self.0(state);
+            match result {
+                Ok(value) => f(value).0(state),
+                Err(err) => (state, Err(err))
+            }
+        }))
+    }
+}
+impl<S: 'static + Copy, E: 'static> Parser<S, S, E>{
+    pub fn get() -> Self {
+        Parser(Box::new(|state| (state, Ok(state))))
+    }
+}
+impl<S: 'static, E: 'static> Parser<S, S, E> {
+    pub fn set(new_state: S) -> Self {
+        Parser(Box::new(|state| (new_state, Ok(state))))
+    }
 }
 #[derive(Clone)]
 pub struct RcQueue<A> {
@@ -96,7 +99,23 @@ impl<A> RcQueue<A> {
         }
     }
 }
-
+impl <S: Clone, E: 'static> Parser<RcQueue<S>, S, E>{
+    pub fn expect(cond: impl 'static + FnOnce(&S) -> bool, error: E) -> Self {
+        Self(Box::new(|mut state| {
+            let state_ = state.clone();
+            match state.pop_front() {
+                None => (state, Err(error)),
+                Some(last) =>
+                    if cond(&last) {
+                        let last = last.clone();
+                        (state, Ok(last))
+                    } else {
+                        (state_, Err(error))
+                    }
+            }
+        }))
+    }
+}
 impl<'a, A: 'static + Clone> From<&'a [A]> for RcQueue<A> {
     fn from(slice: &[A]) -> Self {
         Self {slice: slice.into(), offset: 0, length: slice.len()}
@@ -121,33 +140,18 @@ impl<A> Index<Range<usize>> for RcQueue<A> {
     }
 }
 
-pub fn expect<S: Clone, E: 'static>(cond: impl 'static + FnOnce(&S) -> bool, error: E) -> Parser<RcQueue<S>, S, E> {
-    Box::new(|mut state| {
-        let state_ = state.clone();
-        match state.pop_front() {
-            None => (state, Err(error)),
-            Some(last) =>
-                if cond(&last) {
-                    let last = last.clone();
-                    (state, Ok(last))
-                } else {
-                    (state_, Err(error))
-                }
-        }
-    })
-}
 fn create_parser() -> Parser<RcQueue<char>, (), &'static str> {
     parser!{
-        let! _ = expect(|x| *x == 'H', "Not Matched Error");
-        let! _ = many(|| expect(|x| *x == 'E', "Not Matched Error"));
-        let! _ = expect(|x| *x == 'Y', "Not Matched Error");
-        ret(())
+        let! _ = Parser::expect(|x| *x == 'H', "Not Matched Error");
+        let! _ = Parser::many(|| Parser::expect(|x| *x == 'E', "Not Matched Error"));
+        let! _ = Parser::expect(|x| *x == 'Y', "Not Matched Error");
+        Parser::ret(())
     }
 }
 fn main() {
     let vec: RcQueue<char> = "HEEEY".chars().collect::<Vec<_>>().as_slice().into();
-    assert_eq!(create_parser()(vec), (RcQueue::from(&[] as &[char]), Ok(())));
+    assert_eq!(create_parser().0(vec), (RcQueue::from(&[] as &[char]), Ok(())));
 
     let vec: RcQueue<char> = "Hi".chars().collect::<Vec<_>>().as_slice().into();
-    assert_eq!(create_parser()(vec), (RcQueue::from(&['i'] as &[char]), Err("Not Matched Error")));
+    assert_eq!(create_parser().0(vec), (RcQueue::from(&['i'] as &[char]), Err("Not Matched Error")));
 }
