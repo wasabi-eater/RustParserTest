@@ -79,40 +79,26 @@ impl<A> RcQueue<A> {
     pub fn len(&self) -> usize {
         self.length
     }
-    pub fn pop_front(&mut self) -> Option<&A> {
-        self.offset += 1;
-        if self.length > 0 {
-            self.length -= 1;
-            Some(&self.slice[self.offset - 1])
-        }
-        else {
-            None
-        }
-    }
-    pub fn pop_back(&mut self) -> Option<&A> {
-        if self.length > 0 {
-            self.length -= 1;
-            Some(&self.slice[self.offset + self.length])
-        }
-        else {
-            None
-        }
+    pub fn slice(self, range: Range<usize>) -> Self {
+        let Range{start, end} = range;
+        RcQueue{slice: self.slice, offset: self.offset + start, length: end - start}
     }
 }
 impl <S: Clone, E: 'static> Parser<RcQueue<S>, S, E>{
     pub fn expect(cond: impl 'static + FnOnce(&S) -> bool, error: E) -> Self {
-        Self(Box::new(|mut state| {
-            let state_ = state.clone();
-            match state.pop_front() {
-                None => (state, Err(error)),
-                Some(last) =>
-                    if cond(&last) {
-                        let last = last.clone();
-                        (state, Ok(last))
-                    } else {
-                        (state_, Err(error))
-                    }
+        Self(Box::new(|state| {
+            if state.len() == 0 {
+                return (state, Err(error));
             }
+            let last = state[0].clone();
+            if cond(&last) {
+                let last = last.clone();
+                let len = state.len();
+                (state.slice(1..len), Ok(last))
+            } else {
+                (state, Err(error))
+            }
+            
         }))
     }
 }
