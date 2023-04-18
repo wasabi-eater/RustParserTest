@@ -8,8 +8,8 @@ use std::rc::Rc;
 pub struct Parser<S, A, E>(Box<dyn FnOnce(S) -> (S, Result<A, E>)>);
 #[macro_export]
 macro_rules! parser {
-    {let! $var: pat = $e1: expr; $(let! $v: pat = $e2: expr);* ; $e3: expr} => ($e1.flat_map(|$var| parser!{$(let! $v = $e2);* ; $e3}));
-    {let! $var: pat = $e1: expr; $e2: expr} => ($e1.flat_map(|$var| $e2));
+    {let! $var: pat = $e1: expr; $(let! $v: pat = $e2: expr);* ; $e3: expr} => ($e1.flat_map(move |$var| parser!{$(let! $v = $e2);* ; $e3}));
+    {let! $var: pat = $e1: expr; $e2: expr} => ($e1.flat_map(move |$var| $e2));
     {$e: expr} => ($e);
 }
 impl<S: 'static, A: 'static, E: 'static> Parser<S, A, E>{
@@ -34,11 +34,33 @@ impl<S: 'static, A: 'static, E: 'static> Parser<S, A, E>{
         }
         inner(parser, vec![])
     }
+    pub fn n_(i: usize, parser: impl 'static + Fn() -> Parser<S, A, E>) -> Parser<S, Vec<A>, E> {
+        fn inner<S: 'static, A: 'static, E: 'static>(i: usize, parser: impl 'static + Fn() -> Parser<S, A, E>, mut vec: Vec<A>) -> Parser<S, Vec<A>, E> {
+            if i == 0 { return Parser(Box::new(|state| (state, Ok(vec)))); }
+            parser! {
+                let! result = Parser::try_parse(parser());
+                (match result{
+                    Ok(value) => inner(i - 1, parser, {vec.push(value); vec}),
+                    Err(err) => Parser(Box::new(|state| (state, Err(err))))
+                })
+            }
+        }
+        inner(i, parser, vec![])
+    }
     pub fn flat_map<B>(self, f: impl 'static + FnOnce(A) -> Parser<S, B, E>) -> Parser<S, B, E> {
         Parser(Box::new(|state|{
             let (state, result) = self.0(state);
             match result {
                 Ok(value) => f(value).0(state),
+                Err(err) => (state, Err(err))
+            }
+        }))
+    }
+    pub fn map<B>(self, f: impl 'static + FnOnce(A) -> B) -> Parser<S, B, E> {
+        Parser(Box::new(|state|{
+            let (state, result) = self.0(state);
+            match result {
+                Ok(value) => (state, Ok(f(value))),
                 Err(err) => (state, Err(err))
             }
         }))
@@ -54,6 +76,18 @@ impl<S: 'static, A: 'static, E: 'static> Parser<S, A, E>{
     }
     pub fn any(parsers: impl Iterator<Item = Parser<S, A, E>>) -> Parser<S, A, E> {
         parsers.reduce(Parser::or).expect("Parser::anyの引数は長さが1以上のイテレーターが必要です")
+    }
+    pub fn more_than_n_(i: usize, parser: impl 'static + Fn() -> Parser<S, A, E>) -> Parser<S, Vec<A>, E> {
+        fn inner<S: 'static, A: 'static, E: 'static>(i: usize, parser: impl 'static + Fn() -> Parser<S, A, E>, mut vec: Vec<A>) -> Parser<S, Vec<A>, E> {
+            parser! {
+                let! result = Parser::try_parse(parser());
+                (match result{
+                    Ok(value) => inner(if i == 0 {0} else {i - 1}, parser, {vec.push(value); vec}),
+                    Err(err) => Parser(Box::new(|state| (state, Err(err))))
+                })
+            }
+        }
+        inner(i, parser, vec![])
     }
 }
 impl<S: 'static + Copy, E: 'static> Parser<S, S, E>{
@@ -143,5 +177,8 @@ fn main() {
     println!("{:?}", create_parser().0(state).1);
 
     let state: RcSlice<char> = "55.4444".chars().collect::<Vec<_>>().as_slice().into();
+    println!("{:?}", create_parser().0(state).1);
+    
+    let state: RcSlice<char> = "ABC".chars().collect::<Vec<_>>().as_slice().into();
     println!("{:?}", create_parser().0(state).1);
 }
