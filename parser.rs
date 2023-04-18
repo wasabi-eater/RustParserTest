@@ -5,7 +5,7 @@ use core::ops::Range;
 use core::ops::Index;
 use std::rc::Rc;
 
-struct Parser<S, A, E>(Box<dyn FnOnce(S) -> (S, Result<A, E>)>);
+pub struct Parser<S, A, E>(Box<dyn FnOnce(S) -> (S, Result<A, E>)>);
 #[macro_export]
 macro_rules! parser {
     {let! $var: pat = $e1: expr; $(let! $v: pat = $e2: expr);* ; $e3: expr} => ($e1.flat_map(|$var| parser!{$(let! $v = $e2);* ; $e3}));
@@ -42,6 +42,18 @@ impl<S: 'static, A: 'static, E: 'static> Parser<S, A, E>{
                 Err(err) => (state, Err(err))
             }
         }))
+    }
+    pub fn or(self, right: Parser<S, A, E>) -> Parser<S, A, E> {
+        parser! {
+            let! left = self.try_parse();
+            (match left {
+                Ok(value) => Parser::ret(value),
+                Err(_) => right
+            })
+        }
+    }
+    pub fn any(parsers: impl Iterator<Item = Parser<S, A, E>>) -> Parser<S, A, E> {
+        parsers.reduce(Parser::or).expect("Parser::anyの引数は長さが1以上のイテレーターが必要です")
     }
 }
 impl<S: 'static + Copy, E: 'static> Parser<S, S, E>{
