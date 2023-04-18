@@ -66,6 +66,24 @@ impl<S: 'static, E: 'static> Parser<S, S, E> {
         Parser(Box::new(|state| (new_state, Ok(state))))
     }
 }
+impl <S: Clone, E: 'static> Parser<RcSlice<S>, S, E>{
+    pub fn expect(cond: impl 'static + FnOnce(&S) -> bool, error: E) -> Self {
+        Self(Box::new(|state| {
+            if state.len() == 0 {
+                return (state, Err(error));
+            }
+            let last = &state[0];
+            if cond(last) {
+                let last = last.clone();
+                let len = state.len();
+                (state.slice(1..len), Ok(last))
+            } else {
+                (state, Err(error))
+            }
+            
+        }))
+    }
+}
 #[derive(Clone)]
 pub struct RcSlice<A> {
     slice: Rc<[A]>,
@@ -91,24 +109,6 @@ impl<A> RcSlice<A> {
         Self{slice: self.slice, offset: self.offset + start, length: end - start}
     }
 }
-impl <S: Clone, E: 'static> Parser<RcSlice<S>, S, E>{
-    pub fn expect(cond: impl 'static + FnOnce(&S) -> bool, error: E) -> Self {
-        Self(Box::new(|state| {
-            if state.len() == 0 {
-                return (state, Err(error));
-            }
-            let last = &state[0];
-            if cond(last) {
-                let last = last.clone();
-                let len = state.len();
-                (state.slice(1..len), Ok(last))
-            } else {
-                (state, Err(error))
-            }
-            
-        }))
-    }
-}
 impl<'a, A: 'static + Clone> From<&'a [A]> for RcSlice<A> {
     fn from(slice: &[A]) -> Self {
         Self {slice: slice.into(), offset: 0, length: slice.len()}
@@ -120,18 +120,28 @@ impl<A> Deref for RcSlice<A> {
         self.as_slice()
     }
 }
-fn create_parser() -> Parser<RcSlice<char>, (), &'static str> {
+fn create_parser() -> Parser<RcSlice<char>, String, String> {
+    fn digit() -> Parser<RcSlice<char>, char, String> {
+        Parser::expect(|x| '0' <= *x && *x <= '9', "数字が必要です".to_string())
+    }
+    fn expect_char(c: char) -> Parser<RcSlice<char>, char, String>{
+        Parser::expect(move |x| *x == c, c.to_string() + "文字が異なります")
+    }
     parser!{
-        let! _ = Parser::expect(|x| *x == 'H', "Not Matched Error");
-        let! _ = Parser::many(|| Parser::expect(|x| *x == 'E', "Not Matched Error"));
-        let! _ = Parser::expect(|x| *x == 'Y', "Not Matched Error");
-        Parser::ret(())
+        let! l = Parser::many(digit);
+        let! _ = expect_char('.');
+        let! r = Parser::many(digit);
+        {
+            Parser::ret(format!("{}.{}", 
+                l.into_iter().fold(String::new(), |x, y| x + &y.to_string()),
+                r.into_iter().fold(String::new(), |x, y| x + &y.to_string())))
+        }
     }
 }
 fn main() {
-    let vec: RcSlice<char> = "HEEEY".chars().collect::<Vec<_>>().as_slice().into();
-    assert_eq!(create_parser().0(vec), (RcSlice::from(&[] as &[char]), Ok(())));
+    let state: RcSlice<char> = "23.4".chars().collect::<Vec<_>>().as_slice().into();
+    println!("{:?}", create_parser().0(state).1);
 
-    let vec: RcSlice<char> = "Hi".chars().collect::<Vec<_>>().as_slice().into();
-    assert_eq!(create_parser().0(vec), (RcSlice::from(&['i'] as &[char]), Err("Not Matched Error")));
+    let state: RcSlice<char> = "55.4444".chars().collect::<Vec<_>>().as_slice().into();
+    println!("{:?}", create_parser().0(state).1);
 }
