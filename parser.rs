@@ -45,41 +45,41 @@ impl<S: 'static, A: 'static, E: 'static> Parser<S, A, E>{
     }
 }
 impl<S: 'static + Copy, E: 'static> Parser<S, S, E>{
-    pub fn get() -> Self {
+    pub fn read() -> Self {
         Parser(Box::new(|state| (state, Ok(state))))
     }
 }
 impl<S: 'static, E: 'static> Parser<S, S, E> {
-    pub fn set(new_state: S) -> Self {
+    pub fn write(new_state: S) -> Self {
         Parser(Box::new(|state| (new_state, Ok(state))))
     }
 }
 #[derive(Clone)]
-pub struct RcQueue<A> {
+pub struct RcSlice<A> {
     slice: Rc<[A]>,
     offset: usize,
     length: usize
 }
-impl<A: Debug> Debug for RcQueue<A>{
+impl<A: Debug> Debug for RcSlice<A>{
     fn fmt(&self, formatter: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         self.as_slice().fmt(formatter)
     }
 }
-impl<A: PartialEq> PartialEq for RcQueue<A> {
+impl<A: PartialEq> PartialEq for RcSlice<A> {
     fn eq(&self, right: &Self) -> bool {
         self.as_slice() == right.as_slice()
     }
 }
-impl<A> RcQueue<A> {
+impl<A> RcSlice<A> {
     pub fn as_slice(&self) -> &[A] {
         &self.slice[self.offset..self.offset + self.length]
     }
     pub fn slice(self, range: Range<usize>) -> Self {
         let Range{start, end} = range;
-        RcQueue{slice: self.slice, offset: self.offset + start, length: end - start}
+        Self{slice: self.slice, offset: self.offset + start, length: end - start}
     }
 }
-impl <S: Clone, E: 'static> Parser<RcQueue<S>, S, E>{
+impl <S: Clone, E: 'static> Parser<RcSlice<S>, S, E>{
     pub fn expect(cond: impl 'static + FnOnce(&S) -> bool, error: E) -> Self {
         Self(Box::new(|state| {
             if state.len() == 0 {
@@ -97,18 +97,18 @@ impl <S: Clone, E: 'static> Parser<RcQueue<S>, S, E>{
         }))
     }
 }
-impl<'a, A: 'static + Clone> From<&'a [A]> for RcQueue<A> {
+impl<'a, A: 'static + Clone> From<&'a [A]> for RcSlice<A> {
     fn from(slice: &[A]) -> Self {
         Self {slice: slice.into(), offset: 0, length: slice.len()}
     }
 }
-impl<A> Deref for RcQueue<A> {
+impl<A> Deref for RcSlice<A> {
     type Target = [A];
     fn deref(&self) -> &[A] {
         self.as_slice()
     }
 }
-fn create_parser() -> Parser<RcQueue<char>, (), &'static str> {
+fn create_parser() -> Parser<RcSlice<char>, (), &'static str> {
     parser!{
         let! _ = Parser::expect(|x| *x == 'H', "Not Matched Error");
         let! _ = Parser::many(|| Parser::expect(|x| *x == 'E', "Not Matched Error"));
@@ -117,9 +117,9 @@ fn create_parser() -> Parser<RcQueue<char>, (), &'static str> {
     }
 }
 fn main() {
-    let vec: RcQueue<char> = "HEEEY".chars().collect::<Vec<_>>().as_slice().into();
-    assert_eq!(create_parser().0(vec), (RcQueue::from(&[] as &[char]), Ok(())));
+    let vec: RcSlice<char> = "HEEEY".chars().collect::<Vec<_>>().as_slice().into();
+    assert_eq!(create_parser().0(vec), (RcSlice::from(&[] as &[char]), Ok(())));
 
-    let vec: RcQueue<char> = "Hi".chars().collect::<Vec<_>>().as_slice().into();
-    assert_eq!(create_parser().0(vec), (RcQueue::from(&['i'] as &[char]), Err("Not Matched Error")));
+    let vec: RcSlice<char> = "Hi".chars().collect::<Vec<_>>().as_slice().into();
+    assert_eq!(create_parser().0(vec), (RcSlice::from(&['i'] as &[char]), Err("Not Matched Error")));
 }
