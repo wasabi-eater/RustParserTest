@@ -74,12 +74,6 @@ impl<A> RcQueue<A> {
     pub fn as_slice(&self) -> &[A] {
         &self.slice[self.offset..self.offset + self.length]
     }
-    pub fn get(&self, ind: usize) -> Option<&A> {
-        self.as_slice().get(ind)
-    }
-    pub fn len(&self) -> usize {
-        self.length
-    }
     pub fn slice(self, range: Range<usize>) -> Self {
         let Range{start, end} = range;
         RcQueue{slice: self.slice, offset: self.offset + start, length: end - start}
