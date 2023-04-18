@@ -1,3 +1,4 @@
+use core::ops::Deref;
 use core::fmt::Formatter;
 use core::fmt::Debug;
 use core::ops::Range;
@@ -107,25 +108,12 @@ impl<'a, A: 'static + Clone> From<&'a [A]> for RcQueue<A> {
         Self {slice: slice.into(), offset: 0, length: slice.len()}
     }
 }
-impl<A> Index<usize> for RcQueue<A> {
-    type Output = A;
-    fn index(&self, ind: usize) -> &A {
-        self.get(ind).expect("Index out of range")
+impl<A> Deref for RcQueue<A> {
+    type Target = [A];
+    fn deref(&self) -> &[A] {
+        self.as_slice()
     }
 }
-impl<A> Index<Range<usize>> for RcQueue<A> {
-    type Output = [A];
-    fn index(&self, ind: Range<usize>) -> &[A] {
-        let Range{ end, .. } = ind;
-        if end < self.length {
-            &self.as_slice()[ind]
-        }
-        else {
-            panic!("Index out of range")
-        }
-    }
-}
-
 fn create_parser() -> Parser<RcQueue<char>, (), &'static str> {
     parser!{
         let! _ = Parser::expect(|x| *x == 'H', "Not Matched Error");
