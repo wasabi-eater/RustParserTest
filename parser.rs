@@ -85,8 +85,8 @@ impl <S: Clone, E: 'static> Parser<RcSlice<S>, S, E>{
             if state.len() == 0 {
                 return (state, Err(error));
             }
-            let last = state[0].clone();
-            if cond(&last) {
+            let last = &state[0];
+            if cond(last) {
                 let last = last.clone();
                 let len = state.len();
                 (state.slice(1..len), Ok(last))
