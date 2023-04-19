@@ -77,13 +77,18 @@ impl<S: 'static, A: 'static, E: 'static> Parser<S, A, E>{
     pub fn any(parsers: impl Iterator<Item = Parser<S, A, E>>) -> Parser<S, A, E> {
         parsers.reduce(Parser::or).expect("Parser::anyの引数は長さが1以上のイテレーターが必要です")
     }
-    pub fn more_than_n_(i: usize, parser: impl 'static + Fn() -> Parser<S, A, E>) -> Parser<S, Vec<A>, E> {
+    pub fn more_than(i: usize, parser: impl 'static + Fn() -> Parser<S, A, E>) -> Parser<S, Vec<A>, E> {
         fn inner<S: 'static, A: 'static, E: 'static>(i: usize, parser: impl 'static + Fn() -> Parser<S, A, E>, mut vec: Vec<A>) -> Parser<S, Vec<A>, E> {
             parser! {
                 let! result = Parser::try_parse(parser());
                 (match result{
                     Ok(value) => inner(if i == 0 {0} else {i - 1}, parser, {vec.push(value); vec}),
-                    Err(err) => Parser(Box::new(|state| (state, Err(err))))
+                    Err(err) =>
+                        if i == 0 {
+                            Parser::ret(vec)
+                        } else {
+                            Parser(Box::new(|state| (state, Err(err))))
+                        }
                 })
             }
         }
@@ -162,9 +167,9 @@ fn create_parser() -> Parser<RcSlice<char>, String, String> {
         Parser::expect(move |x| *x == c, c.to_string() + "文字が異なります")
     }
     parser!{
-        let! l = Parser::many(digit);
+        let! l = Parser::more_than(1, digit);
         let! _ = expect_char('.');
-        let! r = Parser::many(digit);
+        let! r = Parser::more_than(1, digit);
         {
             Parser::ret(format!("{}.{}", 
                 l.into_iter().fold(String::new(), |x, y| x + &y.to_string()),
