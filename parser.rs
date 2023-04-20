@@ -8,8 +8,7 @@ use std::rc::Rc;
 pub struct Parser<S, A, E>(Box<dyn FnOnce(S) -> (S, Result<A, E>)>);
 #[macro_export]
 macro_rules! parser {
-    {let! $var: pat = $e1: expr; $(let! $v: pat = $e2: expr);* ; $e3: expr} => ($e1.flat_map(move |$var| parser!{$(let! $v = $e2);* ; $e3}));
-    {let! $var: pat = $e1: expr; $e2: expr} => ($e1.flat_map(move |$var| $e2));
+    {let! $var: pat = $e1: expr; $(let! $v: pat = $e2: expr; )* $e3: expr} => ($e1.flat_map(move |$var| parser!{$(let! $v = $e2; )* $e3}));
     {$e: expr} => ($e);
 }
 impl<S: 'static, A: 'static, E: 'static> Parser<S, A, E>{
