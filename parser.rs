@@ -58,10 +58,7 @@ impl<S: 'static, A: 'static, E: 'static> Parser<S, A, E>{
     pub fn map<B>(self, f: impl 'static + FnOnce(A) -> B) -> Parser<S, B, E> {
         Parser(Box::new(|state|{
             let (state, result) = self.0(state);
-            match result {
-                Ok(value) => (state, Ok(f(value))),
-                Err(err) => (state, Err(err))
-            }
+            (state, result.map(f))
         }))
     }
     pub fn or(self, right: Parser<S, A, E>) -> Parser<S, A, E> {
