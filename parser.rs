@@ -12,12 +12,15 @@ macro_rules! parser {
     {$e: expr} => ($e);
 }
 impl<S: 'static, A: 'static, E: 'static> Parser<S, A, E>{
+    pub fn call(self, state: S) -> (S, Result<A, E>) {
+        self.0(state)
+    }
     pub fn ret(value: A) -> Parser<S, A, E>{
         Parser(Box::new(|state| (state, Ok(value))))
     }
     pub fn try_parse(self) -> Parser<S, Result<A, E>, E> {
         Parser(Box::new(|state| {
-            let (state, result) = self.0(state);
+            let (state, result) = self.call(state);
             (state, Ok(result))
         }))
     }
@@ -46,18 +49,18 @@ impl<S: 'static, A: 'static, E: 'static> Parser<S, A, E>{
         }
         inner(i, parser, vec![])
     }
-    pub fn flat_map<B>(self, f: impl 'static + FnOnce(A) -> Parser<S, B, E>) -> Parser<S, B, E> {
+    pub fn flat_map<B: 'static>(self, f: impl 'static + FnOnce(A) -> Parser<S, B, E>) -> Parser<S, B, E> {
         Parser(Box::new(|state|{
-            let (state, result) = self.0(state);
+            let (state, result) = self.call(state);
             match result {
-                Ok(value) => f(value).0(state),
+                Ok(value) => f(value).call(state),
                 Err(err) => (state, Err(err))
             }
         }))
     }
     pub fn map<B>(self, f: impl 'static + FnOnce(A) -> B) -> Parser<S, B, E> {
         Parser(Box::new(|state|{
-            let (state, result) = self.0(state);
+            let (state, result) = self.call(state);
             (state, result.map(f))
         }))
     }
@@ -115,7 +118,6 @@ impl <S: Clone, E: 'static> Parser<RcSlice<S>, S, E>{
             } else {
                 (state, Err(error))
             }
-            
         }))
     }
 }
@@ -166,20 +168,18 @@ fn create_parser() -> Parser<RcSlice<char>, String, String> {
         let! l = Parser::more_than(1, digit);
         let! _ = expect_char('.');
         let! r = Parser::more_than(1, digit);
-        {
-            Parser::ret(format!("{}.{}", 
-                l.into_iter().fold(String::new(), |x, y| x + &y.to_string()),
-                r.into_iter().fold(String::new(), |x, y| x + &y.to_string())))
-        }
+        Parser::ret(format!("{}.{}", 
+            l.into_iter().fold(String::new(), |x, y| x + &y.to_string()),
+            r.into_iter().fold(String::new(), |x, y| x + &y.to_string())))
     }
 }
 fn main() {
     let state: RcSlice<char> = "23.4".chars().collect::<Vec<_>>().as_slice().into();
-    println!("{:?}", create_parser().0(state).1);
+    println!("{:?}", create_parser().call(state).1);
 
     let state: RcSlice<char> = "55.4444".chars().collect::<Vec<_>>().as_slice().into();
-    println!("{:?}", create_parser().0(state).1);
+    println!("{:?}", create_parser().call(state).1);
     
     let state: RcSlice<char> = "ABC".chars().collect::<Vec<_>>().as_slice().into();
-    println!("{:?}", create_parser().0(state).1);
+    println!("{:?}", create_parser().call(state).1);
 }
